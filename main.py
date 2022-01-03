@@ -14,10 +14,13 @@ import json
 import math
 import pprint
 
+from json_utils import *
 import np_classifier
 # get specific logger
 import logging
 import logging.config
+
+
 logging.config.fileConfig(fname='logger.conf', disable_existing_loggers=False)
 logger = logging.getLogger(__name__)
 
@@ -308,85 +311,47 @@ def np_class(df):
     result_column = df[Columns.canonical_smiles.name].apply(lambda smiles: unique_smiles_dict[smiles])
     # extract and join values from json array - only isglycoside is already a value
     df2 = pd.DataFrame()
-    df2["class_results"] = result_column.apply(lambda json: join(json, "class_results"))
-    df2["superclass_results"] = result_column.apply(lambda json: join(json, "superclass_results"))
-    df2["pathway_results"] = result_column.apply(lambda json: join(json, "pathway_results"))
-    df2["is_glycoside"] = result_column.apply(lambda json: json["isglycoside"] if json is not None else None)
+    df2 = json_col(df2, result_column, "class_results", join)
+    df2 = json_col(df2, result_column, "superclass_results", join)
+    df2 = json_col(df2, result_column, "pathway_results", join)
+    df2 = json_col(df2, result_column, "isglycoside")
+    df2 = json_col(df2, result_column, "fp1")
+    df2 = json_col(df2, result_column, "fp2")
     df2 = df2.add_suffix(NP_CLASSIFIER_SUFFIX)
     return df.join(df2)  # add to original df
 
 
-# def np_class(df, unique_smiles_dict):
-#     # Query NP classifier on GNPS
-#     rs = (grequests.get(np_class_url(smiles)) for smiles in df[Columns.canonical_smiles.name])
-#
-#     responses = grequests.map(rs)
-#     # convert json response to columns, add suffix, add to data frame
-#     contents = [handle_response_to_json(response) for response in responses]
-#     df2 = pd.DataFrame(contents)
-#     # extract and join values from json array - only isglycoside is already a value
-#     df2["class_results"] = df2["class_results"].apply(join)
-#     df2["superclass_results"] = df2["superclass_results"].apply(join)
-#     df2["pathway_results"] = df2["pathway_results"].apply(join)
-#     df2 = df2.add_suffix(NP_CLASSIFIER_SUFFIX)
-#     return df.join(df2)  # add to original df
-
-
-def classyfire(original_df, unique_smiles):
+def classyfire(original_df):
+    unique_smiles_dict = get_unique_canocical_smiles_dict(original_df)
     # Query classyfire on GNPS
-    rs = (grequests.get(classyfire_url(smiles)) for smiles in original_df[Columns.canonical_smiles.name])
-    responses = grequests.map(rs)
-    # convert json response to columns, add suffix, add to data frame
-    contents = [None if response is None or response.text is None else json.loads(response.text) for response in \
-                responses]
-    json_df = pd.DataFrame(contents)
+    for smiles in unique_smiles_dict:
+        unique_smiles_dict[smiles] = get_json_response(classyfire_url(smiles))
+
+    # temp column with json results
+    result_column = original_df[Columns.canonical_smiles.name].apply(lambda smiles: unique_smiles_dict[smiles])
 
     # extract information
     classy_df = pd.DataFrame()
-    classy_df["kingdom"] = json_df["kingdom"].apply(extract_name)
-    classy_df["superclass"] = json_df["superclass"].apply(extract_name)
-    classy_df["class"] = json_df["class"].apply(extract_name)
-    classy_df["subclass"] = json_df["subclass"].apply(extract_name)
-    classy_df["intermediate_nodes"] = json_df["intermediate_nodes"].apply(extract_names_array)
-    classy_df["alternative_parents"] = json_df["alternative_parents"].apply(extract_names_array)
-    classy_df["direct_parent"] = json_df["direct_parent"].apply(extract_name)
-    classy_df["molecular_framework"] = json_df["molecular_framework"]
-    classy_df["substituents"] = json_df["substituents"].apply(join)
-    classy_df["description"] = json_df["description"]
-    classy_df["external_descriptors"] = json_df["external_descriptors"].apply(extract_external_descriptors)
-    classy_df["ancestors"] = json_df["ancestors"].apply(join)
-    classy_df["predicted_chebi_terms"] = json_df["predicted_chebi_terms"].apply(join)
-    classy_df["predicted_lipidmaps_terms"] = json_df["predicted_lipidmaps_terms"].apply(join)
-    classy_df["classification_version"] = json_df["classification_version"]
+    # classy_df["kingdom"] = json_col(result_column, "kingdom", extract_name)
+    # classy_df["superclass"] = result_column.apply(extract_name)
+    # classy_df["class"] = result_column.apply(extract_name)
+    # classy_df["subclass"] = result_column.apply(extract_name)
+    # classy_df["intermediate_nodes"] = result_column.apply(extract_names_array)
+    # classy_df["alternative_parents"] = result_column.apply(extract_names_array)
+    # classy_df["direct_parent"] = result_column.apply(extract_name)
+    # classy_df["molecular_framework"] = result_column.apply("molecular_framework")
+    # classy_df["substituents"] = result_column.apply(join)
+    # classy_df["description"] = result_column.apply("description"])
+    # classy_df["external_descriptors"] = result_column.apply(extract_external_descriptors)
+    # classy_df["ancestors"] = result_column.apply(join)
+    # classy_df["predicted_chebi_terms"] = result_column.apply(join)
+    # classy_df["predicted_lipidmaps_terms"] = result_column.apply(join)
+    # classy_df["classification_version"] = result_column.apply(["classification_version"]
 
     # add suffix to all columns
     classy_df = classy_df.add_suffix(CLASSYFIRE_SUFFIX)
 
     return original_df.join(classy_df)
-
-
-def extract_external_descriptors(json_array):
-    # [{'source': 'CHEBI', 'source_id': 'CHEBI:48565', 'annotations': ['organic heteropentacyclic compound',
-    # 'methyl ester', 'yohimban alkaloid']}]
-    return join(["{} ({}):{}".format(json["source"], json["source_id"], json["annotations"]) for json in json_array])
-
-
-def extract_name(json):
-    return json["name"] if json is not None else None
-
-
-def join(json_array, sep=";"):
-    return sep.join(json_array)
-
-
-def join(json, field, sep=";"):
-    if json is None: return None
-    return sep.join(json[field])
-
-
-def extract_names_array(json_array):
-    return ",".join([json["name"] for json in json_array if json is not None])
-
 
 def search_chembl(inchi_key):
     molecule = new_client.molecule
