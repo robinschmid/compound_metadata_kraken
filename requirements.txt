@@ -1,0 +1,6 @@
+pandas
+requests
+molmass
+aiohttp
+chembl_webresource_client
+rdkit
