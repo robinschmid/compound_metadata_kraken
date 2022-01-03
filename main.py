@@ -214,6 +214,7 @@ class Columns(Enum):
 NP_CLASSIFIER_URL = "https://npclassifier.ucsd.edu/classify?smiles={}"
 CLASSYFIRE_URL = "https://gnps-structure.ucsd.edu/classyfire?smiles={}"
 PUBCHEM_SUFFIX = "_pubchem"
+CHEMBL_SUFFIX = "_chembl"
 CLASSYFIRE_SUFFIX = "_classyfire"
 NP_CLASSIFIER_SUFFIX = "_np_classifier"
 
@@ -222,16 +223,34 @@ NP_CLASSIFIER_SUFFIX = "_np_classifier"
 # violin plots
 # NPAtlas:
 # ORIGIN ORGANISM TYPE
-NP_ATLAS_URL = "https://www.npatlas.org/api/v1/compounds/basicSearch?method=full&inchikey={" \
-               "}&threshold=0&orderby=npaid&ascending=true&limit=10"
+NP_ATLAS_URL = "https://www.npatlas.org/api/v1/compounds/basicSearch?method=full&{}&threshold=0&orderby=npaid&ascending=true&limit=10"
+NP_ATLAS_STRUCTURE_SEARCH_URL = "https://www.npatlas.org/api/v1/compounds/structureSearch?structure={}" \
+                "&type={}&method=sim&threshold=0.9999&skip=0&limit=10&stereo=false"
 
+def np_atlas_url_by_inchikey(inchi_key):
+    return NP_ATLAS_URL.format("inchikey="+urllib.parse.quote(inchi_key))
 
-def np_atlas_url(inchi_key):
-    return NP_ATLAS_URL.format(inchi_key)
+def np_atlas_url_by_smiles(smiles):
+    return NP_ATLAS_URL.format("smiles="+urllib.parse.quote(smiles))
 
+def np_atlas_url_similar_structure(structure, type="inchikey"):
+    return NP_ATLAS_URL.format(urllib.parse.quote(structure), type)
+
+def search_np_atlas_by_inchikey_smiles(entry):
+    # try inchikey - otherwise smiles
+    result = get_json_response(np_atlas_url_by_inchikey(entry[Columns.inchi_key.name]), True)
+    if result is None:
+        result = get_json_response(np_atlas_url_by_smiles(entry[Columns.canonical_smiles.name]), True)
+    # similar structure
+    if result is None:
+        result = get_json_response(np_atlas_url_similar_structure(entry[Columns.inchi_key.name]), True)
+    if result is None:
+        result = get_json_response(np_atlas_url_similar_structure(entry[Columns.canonical_smiles.name], "smiles"), True)
+
+    return result
 
 def search_np_atlas(df):
-    npa = df[Columns.inchi_key.name].apply(lambda inchi_key: get_json_response(np_atlas_url(inchi_key), True))
+    npa = df.apply(lambda row: search_np_atlas_by_inchikey_smiles(row), axis=1)
     df["num_np_atlas_entries"] = npa.apply(len)
     npa = npa.apply(lambda result: result[0] if result else None)
 
@@ -281,7 +300,7 @@ def search_chembl(df):
 
     logger.debug("chembl read finished")
 
-    suffix = PUBCHEM_SUFFIX
+    suffix = CHEMBL_SUFFIX
     json_col(df, chembl, suffix, "molecule_chembl_id")
     json_col(df, chembl, suffix, "pref_name")
     json_col(df, chembl, suffix, "molecule_synonyms", lambda syn: join_array_by_field(syn, "molecule_synonym"))
