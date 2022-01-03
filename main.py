@@ -257,7 +257,7 @@ def main():
 
     # read classes from gnps APIs
     filtered_df = np_class(filtered_df)
-    # filtered_df = classyfire(filtered_df)
+    filtered_df = classyfire(filtered_df)
 
     # read data bases
     # search_chembl(filtered_df)
@@ -311,12 +311,12 @@ def np_class(df):
     result_column = df[Columns.canonical_smiles.name].apply(lambda smiles: unique_smiles_dict[smiles])
     # extract and join values from json array - only isglycoside is already a value
     df2 = pd.DataFrame()
-    df2 = json_col(df2, result_column, "class_results", join)
-    df2 = json_col(df2, result_column, "superclass_results", join)
-    df2 = json_col(df2, result_column, "pathway_results", join)
-    df2 = json_col(df2, result_column, "isglycoside")
-    df2 = json_col(df2, result_column, "fp1")
-    df2 = json_col(df2, result_column, "fp2")
+    json_col(df2, result_column, "class_results", join)
+    json_col(df2, result_column, "superclass_results", join)
+    json_col(df2, result_column, "pathway_results", join)
+    json_col(df2, result_column, "isglycoside")
+    json_col(df2, result_column, "fp1")
+    json_col(df2, result_column, "fp2")
     df2 = df2.add_suffix(NP_CLASSIFIER_SUFFIX)
     return df.join(df2)  # add to original df
 
@@ -332,21 +332,21 @@ def classyfire(original_df):
 
     # extract information
     classy_df = pd.DataFrame()
-    # classy_df["kingdom"] = json_col(result_column, "kingdom", extract_name)
-    # classy_df["superclass"] = result_column.apply(extract_name)
-    # classy_df["class"] = result_column.apply(extract_name)
-    # classy_df["subclass"] = result_column.apply(extract_name)
-    # classy_df["intermediate_nodes"] = result_column.apply(extract_names_array)
-    # classy_df["alternative_parents"] = result_column.apply(extract_names_array)
-    # classy_df["direct_parent"] = result_column.apply(extract_name)
-    # classy_df["molecular_framework"] = result_column.apply("molecular_framework")
-    # classy_df["substituents"] = result_column.apply(join)
-    # classy_df["description"] = result_column.apply("description"])
-    # classy_df["external_descriptors"] = result_column.apply(extract_external_descriptors)
-    # classy_df["ancestors"] = result_column.apply(join)
-    # classy_df["predicted_chebi_terms"] = result_column.apply(join)
-    # classy_df["predicted_lipidmaps_terms"] = result_column.apply(join)
-    # classy_df["classification_version"] = result_column.apply(["classification_version"]
+    json_col(classy_df, result_column, "kingdom", extract_name)
+    json_col(classy_df, result_column, "superclass", extract_name)
+    json_col(classy_df, result_column, "class", extract_name)
+    json_col(classy_df, result_column, "subclass", extract_name)
+    json_col(classy_df, result_column, "intermediate_nodes", extract_names_array)
+    json_col(classy_df, result_column, "alternative_parents", extract_names_array)
+    json_col(classy_df, result_column, "direct_parent", extract_name)
+    json_col(classy_df, result_column, "molecular_framework")
+    json_col(classy_df, result_column, "substituents", join)
+    json_col(classy_df, result_column, "description")
+    json_col(classy_df, result_column, "external_descriptors", extract_external_descriptors)
+    json_col(classy_df, result_column, "ancestors", join)
+    json_col(classy_df, result_column, "predicted_chebi_terms", join)
+    json_col(classy_df, result_column, "predicted_lipidmaps_terms", join)
+    json_col(classy_df, result_column, "classification_version")
 
     # add suffix to all columns
     classy_df = classy_df.add_suffix(CLASSYFIRE_SUFFIX)
@@ -360,5 +360,4 @@ def search_chembl(inchi_key):
     logger.info(mol)
 
 if __name__ == '__main__':
-    search_chembl("")
     main()
