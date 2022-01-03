@@ -273,9 +273,14 @@ def get_pubchem_mol_by_inchikey(inchi_key):
         return None
 
 def search_pubchem(df):
-    pubchem = df[Columns.inchi_key.name].apply(lambda inchi_key: get_pubchem_mol_by_inchikey(inchi_key))
-    df["num_pubchem_entries"] = pubchem.apply(len)
-    pubchem = pubchem.apply(lambda result: result[0].to_dict() if result else None)
+    # seems to be sorted in reverse
+    compounds = get_pubchem_mol_by_inchikey(df[Columns.inchi_key.name].tolist())
+
+    pc_dict = {compound.inchikey : compound for compound in compounds}
+
+    pubchem = df[Columns.inchi_key.name].apply(lambda inchi_key: pc_dict[inchi_key])
+    # df["num_pubchem_entries"] = pubchem.apply(len)
+    pubchem = pubchem.apply(lambda result: result.to_dict() if result else None)
 
     suffix = PUBCHEM_SUFFIX
     json_col(df, pubchem, suffix, "cid")
@@ -295,7 +300,7 @@ def get_chembl_mol_by_inchikey(molecule, inchi_key):
         return None
 
 
-def search_chembl(molecule, df):
+def search_chembl(df):
     # show all available key words
     # available_resources = [resource for resource in dir(new_client) if not resource.startswith('_')]
     # logger.info(available_resources)
@@ -342,7 +347,7 @@ def search_chembl(molecule, df):
 
 
 def main():
-    original_df = pd.read_csv("data/all_smiles.tsv", sep="\t")
+    original_df = pd.read_csv("data/smiles.tsv", sep="\t")
 
     # create mol column and filter rows - missing mol means unparsable smiles or inchi
     try:
@@ -363,8 +368,8 @@ def main():
                 filtered_df[col.name] = col.create_col(filtered_df)
 
         # read classes from gnps APIs
-        filtered_df = np_class(filtered_df)
-        filtered_df = classyfire(filtered_df)
+        # filtered_df = np_class(filtered_df)
+        # filtered_df = classyfire(filtered_df)
 
         # read data bases
         try:
