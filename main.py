@@ -15,6 +15,11 @@ import math
 import pprint
 
 import np_classifier
+# get specific logger
+import logging
+import logging.config
+logging.config.fileConfig(fname='logger.conf', disable_existing_loggers=False)
+logger = logging.getLogger(__name__)
 
 halogens = [9, 17, 35, 53]
 
@@ -80,7 +85,7 @@ def num_halogen_atoms(df):
 
 
 def mol_formula(df):
-    return df[Columns.rdkit_mol.name].apply(lambda mol: Desc.CalcMolFormula(mol))
+    return df[Columns.rdkit_mol.name].apply(lambda mol: None if mol is None else Desc.CalcMolFormula(mol))
 
 
 def exact_mass(df):
@@ -142,6 +147,17 @@ def rdkit_mol(df):
         return df[Columns.inchi.name].apply(lambda inchi: Chem.MolFromInchi(inchi))
     elif Columns.smiles.name in df.columns:
         return df[Columns.smiles.name].apply(lambda smiles: Chem.MolFromSmiles(smiles))
+    else:
+        raise AttributeError("Data frame with inchi or smiles column needed")
+
+
+def get_original_structures(df):
+    if Columns.canonical_smiles.name in df.columns:
+        return df[Columns.canonical_smiles.name]
+    elif Columns.inchi.name in df.columns:
+        return df[Columns.inchi.name]
+    elif Columns.smiles.name in df.columns:
+        return df[Columns.smiles.name]
     else:
         raise AttributeError("Data frame with inchi or smiles column needed")
 
@@ -213,22 +229,40 @@ def search_chembl():
 
 
 def main():
-    df = pd.read_csv("smiles.tsv", sep="\t")
+    original_df = pd.read_csv("data/smiles.tsv", sep="\t")
 
+    # create mol column and filter rows - missing mol means unparsable smiles or inchi
+    try:
+        original_df[Columns.rdkit_mol.name] = Columns.rdkit_mol.create_col(original_df)
+        filtered_df = original_df[original_df[Columns.rdkit_mol.name].astype(bool)]
+    except Exception as e:
+        logger.error("Error while parsing molecular structures", e)
+        exit(1)
+
+    unparsable_rows = len(original_df) - len(filtered_df)
+    if unparsable_rows>0:
+        unparsed_df = original_df[original_df[Columns.rdkit_mol.name].astype(bool)==False]
+        unparsed_structures = get_original_structures(unparsed_df)
+        logger.info("n=%d rows (structures) were not parsed: %s", unparsable_rows, "; ".join(unparsed_structures))
+    else:
+        logger.info("All row structures were parsed")
+
+    # add new columns for chemical properties
     for col in Columns:
-        if col.name not in df:
-            df[col.name] = col.create_col(df)
+        if col.name not in filtered_df:
+            filtered_df[col.name] = col.create_col(filtered_df)
 
     # read classes from gnps APIs
-    df = np_class(df)
-    # df = classyfire(df)
+    filtered_df = np_class(filtered_df)
+    # filtered_df = classyfire(filtered_df)
 
     # read data bases
-    # search_chembl(df)
+    # search_chembl(filtered_df)
 
-    df.drop(columns=[Columns.rdkit_mol.name], axis=1, inplace=True)
+    filtered_df.drop(columns=[Columns.rdkit_mol.name], axis=1, inplace=True)
+    filtered_df.to_csv("results/converted.tsv", sep='\t', encoding='utf-8', index=False)
 
-    df.to_csv("converted.tsv", sep='\t', encoding='utf-8', index=False)
+    exit(0)
 
 
 def classyfire_url(smiles):
@@ -354,5 +388,12 @@ def extract_names_array(json_array):
     return ",".join([json["name"] for json in json_array if json is not None])
 
 
+def search_chembl(inchi_key):
+    molecule = new_client.molecule
+    mol = molecule.filter(molecule_structures__standard_inchi_key='BSYNRYMUTXBXSQ-UHFFFAOYSA-N').only(
+        ['molecule_chembl_id', 'pref_name'])
+    logger.info(mol)
+
 if __name__ == '__main__':
+    search_chembl("")
     main()
