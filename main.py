@@ -265,9 +265,15 @@ def search_np_atlas(df):
 
     return df
 
+def get_pubchem_mol_by_inchikey(inchi_key):
+    try:
+        return get_compounds(inchi_key, 'inchikey')
+    except Exception as e:
+        logger.warning("Error during pubchem query:",e)
+        return None
 
 def search_pubchem(df):
-    pubchem = df[Columns.inchi_key.name].apply(lambda inchi_key: get_compounds(inchi_key, 'inchikey'))
+    pubchem = df[Columns.inchi_key.name].apply(lambda inchi_key: get_pubchem_mol_by_inchikey(inchi_key))
     df["num_pubchem_entries"] = pubchem.apply(len)
     pubchem = pubchem.apply(lambda result: result[0].to_dict() if result else None)
 
@@ -281,8 +287,15 @@ def search_pubchem(df):
 
     return df
 
+def get_chembl_mol_by_inchikey(molecule, inchi_key):
+    try:
+        return molecule.filter(molecule_structures__standard_inchi_key=inchi_key)
+    except Exception as e:
+        logger.warning("Error during chembl query:",e)
+        return None
 
-def search_chembl(df):
+
+def search_chembl(molecule, df):
     # show all available key words
     # available_resources = [resource for resource in dir(new_client) if not resource.startswith('_')]
     # logger.info(available_resources)
@@ -290,8 +303,7 @@ def search_chembl(df):
     # chembl
     molecule = new_client.molecule
 
-    chembl = df[Columns.inchi_key.name].apply(lambda inchi_key: molecule.filter(
-        molecule_structures__standard_inchi_key=inchi_key))
+    chembl = df[Columns.inchi_key.name].apply(lambda inchikey: get_chembl_mol_by_inchikey(molecule, inchikey))
     # .only(['molecule_chembl_id', 'pref_name']))
 
     # add number of results column and then filter to only use first result
@@ -330,7 +342,7 @@ def search_chembl(df):
 
 
 def main():
-    original_df = pd.read_csv("data/smiles.tsv", sep="\t")
+    original_df = pd.read_csv("data/all_smiles.tsv", sep="\t")
 
     # create mol column and filter rows - missing mol means unparsable smiles or inchi
     try:
@@ -355,15 +367,23 @@ def main():
         filtered_df = classyfire(filtered_df)
 
         # read data bases
-        search_chembl(filtered_df)
-        search_pubchem(filtered_df)
-        search_np_atlas(filtered_df)
+        try:
+            search_pubchem(filtered_df)
+        except Exception as e:
+            logger.warning("broke up pubchem search", e)
+        try:
+            search_chembl(filtered_df)
+        except Exception as e:
+            logger.warning("broke up chembl search", e)
+        # search_np_atlas(filtered_df)
 
-        filtered_df.drop(columns=[Columns.rdkit_mol.name], axis=1, inplace=True)
-        filtered_df.to_csv("results/converted.tsv", sep='\t', encoding='utf-8', index=False)
     except Exception as e:
         logger.error("Error while parsing molecular structures", e)
         exit(1)
+
+    # write in any case
+    filtered_df.drop(columns=[Columns.rdkit_mol.name], axis=1, inplace=True)
+    filtered_df.to_csv("results/converted.tsv", sep='\t', encoding='utf-8', index=False)
     # success
     exit(0)
 
