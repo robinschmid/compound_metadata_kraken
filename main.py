@@ -6,6 +6,8 @@ import urllib.parse
 from chembl_webresource_client.new_client import new_client
 from chembl_webresource_client.utils import utils
 
+from pubchempy import get_compounds, Compound
+
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 import rdkit.Chem.rdMolDescriptors as Desc
@@ -19,7 +21,6 @@ import np_classifier
 # get specific logger
 import logging
 import logging.config
-
 
 logging.config.fileConfig(fname='logger.conf', disable_existing_loggers=False)
 logger = logging.getLogger(__name__)
@@ -103,6 +104,10 @@ def mol_weight(df):
     return df[Columns.rdkit_mol.name].apply(lambda mol: round(Descriptors.MolWt(mol), 5))
 
 
+def mol_log_p(df):
+    return df[Columns.rdkit_mol.name].apply(Descriptors.MolLogP)
+
+
 def NumValenceElectrons(df):
     return df[Columns.rdkit_mol.name].apply(lambda mol: Descriptors.NumValenceElectrons(mol))
 
@@ -125,6 +130,10 @@ def num_hetero_atoms(df):
 
 def num_aromatic_rings(df):
     return df[Columns.rdkit_mol.name].apply(lambda mol: Desc.CalcNumAromaticRings(mol))
+
+
+def num_heavy_atoms(df):
+    return df[Columns.rdkit_mol.name].apply(lambda mol: Desc.CalcNumHeavyAtoms(mol))
 
 
 def canonical_smiles(df):
@@ -171,6 +180,7 @@ class Columns(Enum):
     exact_mass = partial(exact_mass)
     mass_defect = partial(mass_defect)
     mw = partial(mol_weight)
+    mol_log_p = partial(mol_log_p)
     hba = partial(calc_hba_acceptor)
     hbd = partial(calc_hbd_donor)
     num_rot_bonds = partial(calc_rotatable_bonds)
@@ -182,6 +192,7 @@ class Columns(Enum):
     p_atoms = partial(num_p_atoms)
     s_atoms = partial(num_s_atoms)
     halogen_atoms = partial(num_halogen_atoms)
+    heavy_atoms = partial(num_heavy_atoms)
     aromatic_rings = partial(num_aromatic_rings)
     valenz = partial(NumValenceElectrons)
     smiles = partial(canonical_smiles)
@@ -202,33 +213,101 @@ class Columns(Enum):
 
 NP_CLASSIFIER_URL = "https://npclassifier.ucsd.edu/classify?smiles={}"
 CLASSYFIRE_URL = "https://gnps-structure.ucsd.edu/classyfire?smiles={}"
+PUBCHEM_SUFFIX = "_pubchem"
 CLASSYFIRE_SUFFIX = "_classyfire"
 NP_CLASSIFIER_SUFFIX = "_np_classifier"
 
-
-# exact mass
-# mass defect
 # IDS ChEBI, PubChem, ChemSpider
-# Formula
 # DBE
-# xlogp
-# flatness
-# H donor / acceptor
-# therapeutic
 # violin plots
 # NPAtlas:
 # ORIGIN ORGANISM TYPE
-def search_chembl():
+NP_ATLAS_URL = "https://www.npatlas.org/api/v1/compounds/basicSearch?method=full&inchikey={" \
+               "}&threshold=0&orderby=npaid&ascending=true&limit=10"
+
+
+def np_atlas_url(inchi_key):
+    return NP_ATLAS_URL.format(inchi_key)
+
+
+def search_np_atlas(df):
+    npa = df[Columns.inchi_key.name].apply(lambda inchi_key: get_json_response(np_atlas_url(inchi_key), True))
+    df["num_np_atlas_entries"] = npa.apply(len)
+    npa = npa.apply(lambda result: result[0] if result else None)
+
+    suffix = NP_CLASSIFIER_SUFFIX
+    json_col(df, npa, suffix, "npaid")
+    json_col(df, npa, suffix, "original_name")
+    json_col(df, npa, suffix, "cluster_id")
+    json_col(df, npa,  suffix,"node_id")
+    json_col(df, npa, suffix, "original_type")
+    json_col(df, npa, suffix, "original_organism")
+    json_col(df, npa, suffix, "original_doi")
+
+    return df
+
+
+def search_pubchem(df):
+    pubchem = df[Columns.inchi_key.name].apply(lambda inchi_key: get_compounds(inchi_key, 'inchikey'))
+    df["num_pubchem_entries"] = pubchem.apply(len)
+    pubchem = pubchem.apply(lambda result: result[0].to_dict() if result else None)
+
+    suffix = PUBCHEM_SUFFIX
+    json_col(df, pubchem, suffix, "cid")
+    json_col(df, pubchem, suffix, "xlogp")
+    json_col(df, pubchem, suffix, "atom_stereo_count")
+    json_col(df, pubchem, suffix, "complexity")
+    json_col(df, pubchem, suffix, "iupac_name")
+    json_col(df, pubchem, suffix, "tpsa", None, "topological_polar_surface_area")  # Topological Polar Surface Area
+
+    return df
+
+
+def search_chembl(df):
+    # show all available key words
+    # available_resources = [resource for resource in dir(new_client) if not resource.startswith('_')]
+    # logger.info(available_resources)
+
     # chembl
     molecule = new_client.molecule
-    molecule.set_format('json')
-    # aspirin = molecule.search('aspirin')
-    aspirin = molecule.search('CC(=O)OCC(CCC=C(C)C)=CCCC(CO)=CCCC(C)=CCO')
 
-    for r in aspirin:
-        pref_name = r['pref_name']
-        if pref_name is not None:
-            print(pref_name)
+    chembl = df[Columns.inchi_key.name].apply(lambda inchi_key: molecule.filter(
+        molecule_structures__standard_inchi_key=inchi_key))
+    # .only(['molecule_chembl_id', 'pref_name']))
+
+    # add number of results column and then filter to only use first result
+    df["num_chembl_entries"] = chembl.apply(len)
+    chembl = chembl.apply(lambda result: None if result is None else result[0])
+
+    logger.debug("chembl read finished")
+
+    suffix = PUBCHEM_SUFFIX
+    json_col(df, chembl, suffix, "molecule_chembl_id")
+    json_col(df, chembl, suffix, "pref_name")
+    json_col(df, chembl, suffix, "molecule_synonyms", lambda syn: join_array_by_field(syn, "molecule_synonym"))
+    json_col(df, chembl, suffix, "therapeutic_flag")
+    json_col(df, chembl, suffix, "natural_product")
+    json_col(df, chembl, suffix, "indication_class")
+    json_col(df, chembl, suffix, "chirality")
+    json_col(df, chembl, suffix, "max_phase")
+    json_col(df, chembl, suffix, "cross_references", lambda xrefs: get_chembl_xref(xrefs, "Wikipedia"), "wikipedia_id")
+    json_col(df, chembl, suffix, "cross_references", lambda xrefs: get_chembl_xref(xrefs, "PubChem"), "pubchem_id")
+    # properties
+    json_col(df, chembl, suffix, "molecule_properties", lambda prop: prop["alogp"], "alogp")
+    json_col(df, chembl, suffix, "molecule_properties", lambda prop: prop["cx_logd"], "cx_logd")
+    json_col(df, chembl, suffix, "molecule_properties", lambda prop: prop["cx_logp"], "cx_logp")
+    json_col(df, chembl, suffix, "molecule_properties", lambda prop: prop["cx_most_apka"], "cx_most_apka")
+    json_col(df, chembl, suffix, "molecule_properties", lambda prop: prop["cx_most_bpka"], "cx_most_bpka")
+
+    return df
+    # molecule.set_format('json')
+    # aspirin = molecule.search('aspirin')
+    # aspirin = molecule.search('CC(=O)OCC(CCC=C(C)C)=CCCC(CO)=CCCC(C)=CCO')
+
+    # for r in aspirin:
+    #     pref_name = r['pref_name']
+    #     if pref_name is not None:
+    #         print(pref_name)
 
 
 def main():
@@ -238,33 +317,35 @@ def main():
     try:
         original_df[Columns.rdkit_mol.name] = Columns.rdkit_mol.create_col(original_df)
         filtered_df = original_df[original_df[Columns.rdkit_mol.name].astype(bool)]
+
+        unparsable_rows = len(original_df) - len(filtered_df)
+        if unparsable_rows > 0:
+            unparsed_df = original_df[original_df[Columns.rdkit_mol.name].astype(bool) == False]
+            unparsed_structures = get_original_structures(unparsed_df)
+            logger.info("n=%d rows (structures) were not parsed: %s", unparsable_rows, "; ".join(unparsed_structures))
+        else:
+            logger.info("All row structures were parsed")
+
+        # add new columns for chemical properties
+        for col in Columns:
+            if col.name not in filtered_df:
+                filtered_df[col.name] = col.create_col(filtered_df)
+
+        # read classes from gnps APIs
+        filtered_df = np_class(filtered_df)
+        filtered_df = classyfire(filtered_df)
+
+        # read data bases
+        search_chembl(filtered_df)
+        search_pubchem(filtered_df)
+        search_np_atlas(filtered_df)
+
+        filtered_df.drop(columns=[Columns.rdkit_mol.name], axis=1, inplace=True)
+        filtered_df.to_csv("results/converted.tsv", sep='\t', encoding='utf-8', index=False)
     except Exception as e:
         logger.error("Error while parsing molecular structures", e)
         exit(1)
-
-    unparsable_rows = len(original_df) - len(filtered_df)
-    if unparsable_rows>0:
-        unparsed_df = original_df[original_df[Columns.rdkit_mol.name].astype(bool)==False]
-        unparsed_structures = get_original_structures(unparsed_df)
-        logger.info("n=%d rows (structures) were not parsed: %s", unparsable_rows, "; ".join(unparsed_structures))
-    else:
-        logger.info("All row structures were parsed")
-
-    # add new columns for chemical properties
-    for col in Columns:
-        if col.name not in filtered_df:
-            filtered_df[col.name] = col.create_col(filtered_df)
-
-    # read classes from gnps APIs
-    filtered_df = np_class(filtered_df)
-    filtered_df = classyfire(filtered_df)
-
-    # read data bases
-    # search_chembl(filtered_df)
-
-    filtered_df.drop(columns=[Columns.rdkit_mol.name], axis=1, inplace=True)
-    filtered_df.to_csv("results/converted.tsv", sep='\t', encoding='utf-8', index=False)
-
+    # success
     exit(0)
 
 
@@ -276,9 +357,9 @@ def np_class_url(smiles):
     return NP_CLASSIFIER_URL.format(urllib.parse.quote(smiles))
 
 
-def get_json_response(url):
+def get_json_response(url, post=False):
     try:
-        response = requests.get(url)
+        response = requests.post(url) if post else requests.get(url)
         response.raise_for_status()
         return json.loads(response.text)
     except requests.exceptions.HTTPError as errh:
@@ -310,15 +391,13 @@ def np_class(df):
     # temp column with json results
     result_column = df[Columns.canonical_smiles.name].apply(lambda smiles: unique_smiles_dict[smiles])
     # extract and join values from json array - only isglycoside is already a value
-    df2 = pd.DataFrame()
-    json_col(df2, result_column, "class_results", join)
-    json_col(df2, result_column, "superclass_results", join)
-    json_col(df2, result_column, "pathway_results", join)
-    json_col(df2, result_column, "isglycoside")
-    json_col(df2, result_column, "fp1")
-    json_col(df2, result_column, "fp2")
-    df2 = df2.add_suffix(NP_CLASSIFIER_SUFFIX)
-    return df.join(df2)  # add to original df
+    json_col(df, result_column, NP_CLASSIFIER_SUFFIX, "class_results", join)
+    json_col(df, result_column, NP_CLASSIFIER_SUFFIX, "superclass_results", join)
+    json_col(df, result_column, NP_CLASSIFIER_SUFFIX, "pathway_results", join)
+    json_col(df, result_column, NP_CLASSIFIER_SUFFIX, "isglycoside")
+    json_col(df, result_column, NP_CLASSIFIER_SUFFIX, "fp1")
+    json_col(df, result_column, NP_CLASSIFIER_SUFFIX, "fp2")
+    return df
 
 
 def classyfire(original_df):
@@ -331,33 +410,24 @@ def classyfire(original_df):
     result_column = original_df[Columns.canonical_smiles.name].apply(lambda smiles: unique_smiles_dict[smiles])
 
     # extract information
-    classy_df = pd.DataFrame()
-    json_col(classy_df, result_column, "kingdom", extract_name)
-    json_col(classy_df, result_column, "superclass", extract_name)
-    json_col(classy_df, result_column, "class", extract_name)
-    json_col(classy_df, result_column, "subclass", extract_name)
-    json_col(classy_df, result_column, "intermediate_nodes", extract_names_array)
-    json_col(classy_df, result_column, "alternative_parents", extract_names_array)
-    json_col(classy_df, result_column, "direct_parent", extract_name)
-    json_col(classy_df, result_column, "molecular_framework")
-    json_col(classy_df, result_column, "substituents", join)
-    json_col(classy_df, result_column, "description")
-    json_col(classy_df, result_column, "external_descriptors", extract_external_descriptors)
-    json_col(classy_df, result_column, "ancestors", join)
-    json_col(classy_df, result_column, "predicted_chebi_terms", join)
-    json_col(classy_df, result_column, "predicted_lipidmaps_terms", join)
-    json_col(classy_df, result_column, "classification_version")
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "kingdom", extract_name)
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "superclass", extract_name)
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "class", extract_name)
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "subclass", extract_name)
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "intermediate_nodes", extract_names_array)
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "alternative_parents", extract_names_array)
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "direct_parent", extract_name)
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "molecular_framework")
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "substituents", join)
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "description")
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "external_descriptors", extract_external_descriptors)
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "ancestors", join)
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "predicted_chebi_terms", join)
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "predicted_lipidmaps_terms", join)
+    json_col(original_df, result_column, CLASSYFIRE_SUFFIX, "classification_version")
 
-    # add suffix to all columns
-    classy_df = classy_df.add_suffix(CLASSYFIRE_SUFFIX)
+    return original_df
 
-    return original_df.join(classy_df)
-
-def search_chembl(inchi_key):
-    molecule = new_client.molecule
-    mol = molecule.filter(molecule_structures__standard_inchi_key='BSYNRYMUTXBXSQ-UHFFFAOYSA-N').only(
-        ['molecule_chembl_id', 'pref_name'])
-    logger.info(mol)
 
 if __name__ == '__main__':
     main()

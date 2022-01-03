@@ -4,3 +4,4 @@ molmass
 aiohttp
 chembl_webresource_client
 rdkit-pypi
+pubchempy
