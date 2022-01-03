@@ -176,6 +176,11 @@ def get_original_structures(df):
 
 class Columns(Enum):
     rdkit_mol = partial(rdkit_mol)
+    smiles = partial(canonical_smiles)
+    canonical_smiles = partial(canonical_smiles)
+    inchi = partial(inchi)
+    inchi_key = partial(inchi_key)
+    smarts = partial(smarts)
     formula = partial(mol_formula)
     exact_mass = partial(exact_mass)
     mass_defect = partial(mass_defect)
@@ -195,11 +200,6 @@ class Columns(Enum):
     heavy_atoms = partial(num_heavy_atoms)
     aromatic_rings = partial(num_aromatic_rings)
     valenz = partial(NumValenceElectrons)
-    smiles = partial(canonical_smiles)
-    canonical_smiles = partial(canonical_smiles)
-    inchi = partial(inchi)
-    inchi_key = partial(inchi_key)
-    smarts = partial(smarts)
 
     def create_col(self, df):
         return self.__call__(df)
@@ -347,7 +347,7 @@ def search_chembl(df):
 
 
 def main():
-    original_df = pd.read_csv("data/smiles.tsv", sep="\t")
+    original_df = pd.read_csv("data/all_smiles.tsv", sep="\t")
 
     # create mol column and filter rows - missing mol means unparsable smiles or inchi
     try:
@@ -368,8 +368,8 @@ def main():
                 filtered_df[col.name] = col.create_col(filtered_df)
 
         # read classes from gnps APIs
-        # filtered_df = np_class(filtered_df)
-        # filtered_df = classyfire(filtered_df)
+        filtered_df = np_class(filtered_df)
+        filtered_df = classyfire(filtered_df)
 
         # read data bases
         try:
