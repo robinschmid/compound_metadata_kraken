@@ -272,7 +272,7 @@ def get_pubchem_mol_by_inchikey(inchi_key):
         logger.warning("Error during pubchem query:",e)
         return None
 
-def search_pubchem(df):
+def add_pubchem_columns(df):
     # seems to be sorted in reverse
     compounds = get_pubchem_mol_by_inchikey(df[Columns.inchi_key.name].tolist())
 
@@ -300,7 +300,7 @@ def get_chembl_mol_by_inchikey(molecule, inchi_key):
         return None
 
 
-def search_chembl(df):
+def add_chembl_columns(df):
     # show all available key words
     # available_resources = [resource for resource in dir(new_client) if not resource.startswith('_')]
     # logger.info(available_resources)
@@ -346,40 +346,34 @@ def search_chembl(df):
     #         print(pref_name)
 
 
-def main():
-    original_df = pd.read_csv("data/all_smiles.tsv", sep="\t")
-
+def main(data_file, export_file, compute_rdkit=True, search_npclass=True, search_classyfire=True, search_pubchem=True, search_chembl=True):
     # create mol column and filter rows - missing mol means unparsable smiles or inchi
     try:
-        original_df[Columns.rdkit_mol.name] = Columns.rdkit_mol.create_col(original_df)
-        filtered_df = original_df[original_df[Columns.rdkit_mol.name].astype(bool)]
+        original_df = import_data(data_file)
 
-        unparsable_rows = len(original_df) - len(filtered_df)
-        if unparsable_rows > 0:
-            unparsed_df = original_df[original_df[Columns.rdkit_mol.name].astype(bool) == False]
-            unparsed_structures = get_original_structures(unparsed_df)
-            logger.info("n=%d rows (structures) were not parsed: %s", unparsable_rows, "; ".join(unparsed_structures))
+        # smiles, inchikey,... columns from rdkit
+        if compute_rdkit:
+            filtered_df = compute_rdkit_columns(original_df)
         else:
-            logger.info("All row structures were parsed")
-
-        # add new columns for chemical properties
-        for col in Columns:
-            if col.name not in filtered_df:
-                filtered_df[col.name] = col.create_col(filtered_df)
+            filtered_df = original_df
 
         # read classes from gnps APIs
-        filtered_df = np_class(filtered_df)
-        filtered_df = classyfire(filtered_df)
+        if search_npclass:
+            filtered_df = np_class(filtered_df)
+        if search_classyfire:
+            filtered_df = classyfire(filtered_df)
 
         # read data bases
-        try:
-            search_pubchem(filtered_df)
-        except Exception as e:
-            logger.warning("broke up pubchem search", e)
-        try:
-            search_chembl(filtered_df)
-        except Exception as e:
-            logger.warning("broke up chembl search", e)
+        if search_pubchem:
+            try:
+                add_pubchem_columns(filtered_df)
+            except Exception as e:
+                logger.warning("broke up pubchem search", e)
+        if search_chembl:
+            try:
+                add_chembl_columns(filtered_df)
+            except Exception as e:
+                logger.warning("broke up chembl search", e)
         # search_np_atlas(filtered_df)
 
     except Exception as e:
@@ -387,10 +381,36 @@ def main():
         exit(1)
 
     # write in any case
-    filtered_df.drop(columns=[Columns.rdkit_mol.name], axis=1, inplace=True)
-    filtered_df.to_csv("results/converted.tsv", sep='\t', encoding='utf-8', index=False)
+    export_tsv_file(export_file, filtered_df)
     # success
     exit(0)
+
+
+def export_tsv_file(export_file, filtered_df):
+    filtered_df.to_csv(export_file, sep='\t', encoding='utf-8', index=False)
+
+
+def compute_rdkit_columns(original_df):
+    original_df[Columns.rdkit_mol.name] = Columns.rdkit_mol.create_col(original_df)
+    filtered_df = original_df[original_df[Columns.rdkit_mol.name].astype(bool)]
+    unparsable_rows = len(original_df) - len(filtered_df)
+    if unparsable_rows > 0:
+        unparsed_df = original_df[original_df[Columns.rdkit_mol.name].astype(bool) == False]
+        unparsed_structures = get_original_structures(unparsed_df)
+        logger.info("n=%d rows (structures) were not parsed: %s", unparsable_rows, "; ".join(unparsed_structures))
+    else:
+        logger.info("All row structures were parsed")
+    # add new columns for chemical properties
+    for col in Columns:
+        if col.name not in filtered_df:
+            filtered_df[col.name] = col.create_col(filtered_df)
+
+    filtered_df.drop(columns=[Columns.rdkit_mol.name], axis=1, inplace=True)
+    return filtered_df
+
+
+def import_data(data_file):
+    return pd.read_csv(data_file, sep="\t")
 
 
 def classyfire_url(smiles):
@@ -474,4 +494,6 @@ def classyfire(original_df):
 
 
 if __name__ == '__main__':
-    main()
+    # main("data/all_smiles.tsv", "results/converted.tsv")
+    main("results/full_table.tsv", "results/ft_pc.tsv", compute_rdkit=False, search_npclass=False,
+         search_classyfire=False, search_pubchem=True, search_chembl=False)
