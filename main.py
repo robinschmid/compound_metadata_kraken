@@ -349,8 +349,9 @@ def add_chembl_columns(df):
 def main(data_file, export_file, compute_rdkit=True, search_npclass=True, search_classyfire=True, search_pubchem=True, search_chembl=True):
     # create mol column and filter rows - missing mol means unparsable smiles or inchi
     try:
+        logger.info("Start import")
         original_df = import_data(data_file)
-
+        logger.info("Data imported from{}".format(data_file))
         # smiles, inchikey,... columns from rdkit
         if compute_rdkit:
             filtered_df = compute_rdkit_columns(original_df)
@@ -387,10 +388,12 @@ def main(data_file, export_file, compute_rdkit=True, search_npclass=True, search
 
 
 def export_tsv_file(export_file, filtered_df):
+    logger.info("Export results to file {}".format(export_file))
     filtered_df.to_csv(export_file, sep='\t', encoding='utf-8', index=False)
 
 
 def compute_rdkit_columns(original_df):
+    logger.info("Computing values by rdkit")
     original_df[Columns.rdkit_mol.name] = Columns.rdkit_mol.create_col(original_df)
     filtered_df = original_df[original_df[Columns.rdkit_mol.name].astype(bool)]
     unparsable_rows = len(original_df) - len(filtered_df)
@@ -405,6 +408,7 @@ def compute_rdkit_columns(original_df):
         if col.name not in filtered_df:
             filtered_df[col.name] = col.create_col(filtered_df)
 
+    logger.info("RDKIT values computed")
     filtered_df.drop(columns=[Columns.rdkit_mol.name], axis=1, inplace=True)
     return filtered_df
 
@@ -495,5 +499,5 @@ def classyfire(original_df):
 
 if __name__ == '__main__':
     # main("data/all_smiles.tsv", "results/converted.tsv")
-    main("results/full_table.tsv", "results/ft_pc.tsv", compute_rdkit=False, search_npclass=False,
-         search_classyfire=False, search_pubchem=True, search_chembl=False)
+    main("data/coconut_db.tsv", "results/coconut_db_converted.tsv", compute_rdkit=True, search_npclass=False,
+         search_classyfire=False, search_pubchem=False, search_chembl=False)
