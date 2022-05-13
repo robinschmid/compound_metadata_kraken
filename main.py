@@ -158,7 +158,7 @@ def rdkit_mol(df):
     elif Columns.inchi.name in df.columns:
         return df[Columns.inchi.name].apply(lambda inchi: Chem.MolFromInchi(inchi))
     elif Columns.smiles.name in df.columns:
-        return df[Columns.smiles.name].apply(lambda smiles: Chem.MolFromSmiles(smiles))
+        return df[Columns.smiles.name].apply(lambda smiles: Chem.MolFromSmiles(str(smiles)))
     else:
         raise AttributeError("Data frame with inchi or smiles column needed")
 
@@ -399,8 +399,7 @@ def compute_rdkit_columns(original_df):
     unparsable_rows = len(original_df) - len(filtered_df)
     if unparsable_rows > 0:
         unparsed_df = original_df[original_df[Columns.rdkit_mol.name].astype(bool) == False]
-        unparsed_structures = get_original_structures(unparsed_df)
-        logger.info("n=%d rows (structures) were not parsed: %s", unparsable_rows, "; ".join(unparsed_structures))
+        logger.info("n=%d rows (structures) were not parsed", unparsable_rows)
     else:
         logger.info("All row structures were parsed")
     # add new columns for chemical properties
@@ -499,5 +498,6 @@ def classyfire(original_df):
 
 if __name__ == '__main__':
     # main("data/all_smiles.tsv", "results/converted.tsv")
-    main("data/coconut_db.tsv", "results/coconut_db_converted.tsv", compute_rdkit=True, search_npclass=False,
-         search_classyfire=False, search_pubchem=False, search_chembl=False)
+    main("data/MCE_Library_zdenek.tsv", "results/MCE_Library_zdenek_converted.tsv", compute_rdkit=True,
+         search_npclass=True,
+         search_classyfire=True, search_pubchem=False, search_chembl=True)
